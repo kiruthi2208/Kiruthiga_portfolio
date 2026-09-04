@@ -133,11 +133,16 @@ export function Chatbot({ onInquirySubmit }: { onInquirySubmit?: () => void }) {
     };
     sessionStorage.setItem('kiri-inquiry', JSON.stringify(inquiryData));
 
+    const transcript = messages
+      .map((m) => `${m.role === 'user' ? 'Visitor' : 'Kiri AI'}: ${m.content}`)
+      .join('\n\n');
+    sessionStorage.setItem('kiri-conversation', transcript);
+
     setMessages((prev) => [
       ...prev,
       {
         role: 'assistant',
-        content: "I've saved your project details. Let me take you to the contact form — your information is already filled in! You can review everything and send it via Email or WhatsApp.",
+        content: "I've saved your project details. Let me take you to the contact form — your information is already filled in! You can review everything and send your inquiry directly.",
       },
     ]);
 

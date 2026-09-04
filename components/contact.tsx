@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   ArrowRight, MessageCircle, Linkedin, Mail, Phone, Copy, Check, AlertCircle,
+  Loader2, CheckCircle2, Send,
 } from 'lucide-react';
 import { personalInfo, projectTypes, budgetRanges } from '@/lib/portfolio-data';
 
@@ -18,6 +19,7 @@ type PrefillData = {
 export function Contact({ prefillTrigger }: { prefillTrigger?: number }) {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState<string | null>(null);
+  const [submitState, setSubmitState] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
 
   const [formData, setFormData] = useState({
     name: '',
@@ -58,30 +60,38 @@ export function Contact({ prefillTrigger }: { prefillTrigger?: number }) {
     return Object.keys(e).length === 0;
   };
 
-  const buildMessageBody = () => {
-    return [
-      `Name: ${formData.name}`,
-      `Email: ${formData.email}`,
-      `Project Type: ${formData.projectType}`,
-      `Budget: ${formData.budget || 'Not specified'}`,
-      `Message: ${formData.message}`,
-    ].join('\n');
-  };
-
-  const handleSubmit = (ev: React.FormEvent, channel: 'email' | 'whatsapp') => {
+  const handleSubmit = async (ev: React.FormEvent) => {
     ev.preventDefault();
     if (!validate()) return;
+    setSubmitState('submitting');
 
-    const body = buildMessageBody();
+    try {
+      const conversation = sessionStorage.getItem('kiri-conversation') || undefined;
+      const res = await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: formData.name.trim(),
+          email: formData.email.trim(),
+          projectType: formData.projectType || undefined,
+          budget: formData.budget || undefined,
+          message: formData.message.trim(),
+          source: conversation ? 'kiri-ai' : 'contact-form',
+          conversation,
+        }),
+      });
 
-    if (channel === 'email') {
-      const subject = `New Project Inquiry — ${formData.name} — ${formData.projectType}`;
-      const mailtoUrl = `mailto:${personalInfo.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-      window.location.href = mailtoUrl;
-    } else {
-      const waText = `New Project Inquiry\n\n${body}`;
-      const waUrl = `${personalInfo.whatsapp}?text=${encodeURIComponent(waText)}`;
-      window.open(waUrl, '_blank', 'noopener,noreferrer');
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        throw new Error(data.error || 'Request failed');
+      }
+
+      setSubmitState('success');
+      setFormData({ name: '', email: '', projectType: '', budget: '', message: '' });
+      sessionStorage.removeItem('kiri-conversation');
+    } catch {
+      setSubmitState('error');
     }
   };
 
@@ -326,27 +336,68 @@ export function Contact({ prefillTrigger }: { prefillTrigger?: number }) {
                 />
               </FormField>
 
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-                <span className="text-xs text-muted-foreground">{formData.message.length}/2000</span>
-                <div className="flex flex-col sm:flex-row gap-3">
+              {submitState === 'success' ? (
+                <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-green-500/30 bg-green-500/5 p-8 text-center">
+                  <CheckCircle2 className="h-10 w-10 text-green-500" />
+                  <div>
+                    <p className="text-base font-semibold">Thanks! Your project inquiry has been sent successfully. I'll get back to you soon.</p>
+                  </div>
                   <button
                     type="button"
-                    onClick={(ev) => handleSubmit(ev, 'email')}
-                    className="group inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-6 py-3 text-sm font-semibold text-accent-foreground transition-all hover:shadow-[0_0_25px_-5px_hsl(var(--accent)/0.5)] hover:scale-[1.02]"
+                    onClick={() => setSubmitState('idle')}
+                    className="mt-2 text-sm font-medium text-accent hover:underline"
                   >
-                    <Mail className="h-4 w-4" />
-                    Send via Email
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(ev) => handleSubmit(ev, 'whatsapp')}
-                    className="group inline-flex items-center justify-center gap-2 rounded-xl border border-green-500/40 bg-green-500/10 px-6 py-3 text-sm font-semibold text-green-600 dark:text-green-400 transition-all hover:bg-green-500/20 hover:scale-[1.02]"
-                  >
-                    <MessageCircle className="h-4 w-4" />
-                    Send via WhatsApp
+                    Send another inquiry
                   </button>
                 </div>
-              </div>
+              ) : submitState === 'error' ? (
+                <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-red-500/30 bg-red-500/5 p-6 text-center">
+                  <AlertCircle className="h-10 w-10 text-red-500" />
+                  <p className="text-sm text-muted-foreground max-w-md">
+                    Something went wrong while sending your inquiry. Please try again or contact me directly by email or WhatsApp.
+                  </p>
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setSubmitState('idle')}
+                      className="rounded-xl border border-border px-4 py-2 text-sm font-medium hover:bg-muted transition-colors"
+                    >
+                      Try again
+                    </button>
+                    <a
+                      href={personalInfo.whatsapp}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 rounded-xl border border-green-500/40 bg-green-500/10 px-4 py-2 text-sm font-semibold text-green-600 dark:text-green-400 hover:bg-green-500/20 transition-colors"
+                    >
+                      <MessageCircle className="h-4 w-4" />
+                      WhatsApp
+                    </a>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+                  <span className="text-xs text-muted-foreground">{formData.message.length}/2000</span>
+                  <button
+                    type="button"
+                    onClick={handleSubmit}
+                    disabled={submitState === 'submitting'}
+                    className="group inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-6 py-3 text-sm font-semibold text-accent-foreground transition-all hover:shadow-[0_0_25px_-5px_hsl(var(--accent)/0.5)] hover:scale-[1.02] disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100"
+                  >
+                    {submitState === 'submitting' ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Sending...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="h-4 w-4" />
+                        Send Project Inquiry
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
             </form>
           </motion.div>
         </div>
