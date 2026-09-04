@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { Resend } from 'resend';
 
-const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
-const contactEmail = process.env.CONTACT_EMAIL || 'kiruthigas2208@gmail.com';
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const CONTACT_EMAIL = process.env.CONTACT_EMAIL || 'kiruthigas2208@gmail.com';
+const RESEND_API_URL = 'https://api.resend.com/emails';
 
 const rateLimitStore = new Map<string, number[]>();
 
@@ -100,15 +100,13 @@ export async function POST(request: Request) {
     // Sanitize
     const cleanName = sanitize(name);
     const cleanEmail = sanitize(email);
-    const cleanProjectType = sanitize(projectType);
+    const cleanProjectType = projectType ? sanitize(projectType) : '';
     const cleanBudget = budget ? sanitize(budget) : 'Not specified';
     const cleanMessage = sanitize(message);
 
     const timestamp = new Date().toISOString();
     const isKiriAI = source === 'kiri-ai';
-    const subject = isKiriAI
-      ? `NEW PROJECT INQUIRY — KIRI AI — ${cleanProjectType || 'Project'}`
-      : `New Portfolio Project Inquiry — ${cleanProjectType || 'Project'}`;
+    const subject = `New Portfolio Project Inquiry — ${cleanProjectType || 'Project'}`;
     const headerLabel = isKiriAI ? 'New Project Inquiry — Kiri AI' : 'New Project Inquiry';
     const headerSub = isKiriAI
       ? 'Kiruthiga S — Kiri AI Chatbot Lead'
@@ -145,47 +143,65 @@ export async function POST(request: Request) {
       </div>
     `;
 
-    const textBody = `
-${headerLabel}
+    const textBody = [
+      `${headerLabel}`,
+      '',
+      `Name: ${cleanName}`,
+      `Email: ${cleanEmail}`,
+      `Project Type: ${cleanProjectType || 'Not specified'}`,
+      `Budget: ${cleanBudget}`,
+      '',
+      `${isKiriAI ? 'Requirements' : 'Message'}:`,
+      cleanMessage,
+      conversation ? `\nChat Conversation:\n${conversation}\n` : '',
+      `Submitted: ${timestamp}`,
+      '',
+      headerSub,
+    ].join('\n').trim();
 
-Name: ${cleanName}
-Email: ${cleanEmail}
-Project Type: ${cleanProjectType || 'Not specified'}
-Budget: ${cleanBudget}
-
-${isKiriAI ? 'Requirements' : 'Message'}:
-${cleanMessage}
-${conversation ? `\nChat Conversation:\n${conversation}\n` : ''}
-Submitted: ${timestamp}
-
-${headerSub}
-    `.trim();
-
-    if (resend) {
-      const { error } = await resend.emails.send({
-        from: 'Portfolio Contact <onboarding@resend.dev>',
-        to: contactEmail,
-        replyTo: cleanEmail,
-        subject,
-        html: htmlBody,
-        text: textBody,
-      });
-
-      if (error) {
-        console.error('Resend error:', error);
-        return NextResponse.json(
-          { error: 'Failed to send email. Please try again later.' },
-          { status: 500 }
-        );
-      }
-
-      return NextResponse.json({ success: true });
-    } else {
+    if (!RESEND_API_KEY) {
       return NextResponse.json(
-        { error: 'Email delivery is not yet configured. Please contact kiruthigas2208@gmail.com directly.' },
+        { error: 'Email delivery is not yet configured.' },
         { status: 503 }
       );
     }
+
+    const resendResponse = await fetch(RESEND_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${RESEND_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: 'Portfolio Contact <onboarding@resend.dev>',
+        to: CONTACT_EMAIL,
+        reply_to: cleanEmail,
+        subject,
+        html: htmlBody,
+        text: textBody,
+      }),
+    });
+
+    if (!resendResponse.ok) {
+      const errorData = await resendResponse.json().catch(() => ({}));
+      console.error('Resend API error:', resendResponse.status, errorData);
+      return NextResponse.json(
+        { error: 'Failed to send email. Please try again later.' },
+        { status: 500 }
+      );
+    }
+
+    const data = await resendResponse.json().catch(() => ({}));
+
+    if (!data.id) {
+      console.error('Resend API returned no email id:', data);
+      return NextResponse.json(
+        { error: 'Failed to send email. Please try again later.' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ success: true });
   } catch (err) {
     console.error('Contact API error:', err);
     return NextResponse.json(
